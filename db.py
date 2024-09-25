@@ -1,4 +1,5 @@
 import psycopg2
+import psycopg2.extras as extras
 import logging
 
 # Configure logging
@@ -24,7 +25,7 @@ class Database:
                 host=db_host,
                 port=db_port
             )
-            self.conn.autocommit = False
+            self.conn.autocommit = True
             self.cursor = self.conn.cursor()
             logging.info("Database connection established successfully.")
         except psycopg2.Error as e:
@@ -33,7 +34,7 @@ class Database:
 
     def create_articles_table(self):
         """
-        Creates the 'articles' table in the database if it doesn't already exist.
+        Creates the 'articles_nltimes' table in the database if it doesn't already exist.
         """
         create_table_query = """
         CREATE TABLE IF NOT EXISTS articles_nltimes (
@@ -52,33 +53,39 @@ class Database:
             logging.error(f"Error creating articles_nltimes table: {e}")
             raise
 
-    def insert_article(self, link, title, text, categories, published_at):
+    def insert_articles(self, articles):
         """
-        Inserts an article into the 'articles_nltimes' table.
+        Inserts multiple articles into the 'articles_nltimes' table in a single query.
         
         Args:
-            link (str): Article URL.
-            title (str): Title of the article.
-            text (str): Full text of the article.
-            categories (list): List of categories the article belongs to.
-            published_at (datetime): Publication date of the article.
+            articles (dict): Dictionary containing article information with lists of values.
+                             The keys should be 'link', 'title', 'text', 'categories', 'published_at'.
         """
         insert_query = """
         INSERT INTO articles_nltimes (link, title, text, categories, published_at)
-        VALUES (%s, %s, %s, %s, %s)
+        VALUES %s
         ON CONFLICT (link) DO NOTHING;
         """
-        categories_str = ','.join(categories)  # Convert list to comma-separated string
-        
-        try:
-            self.cursor.execute(insert_query, (link, title, text, categories_str, published_at))
-            logging.info(f"Article '{title}' inserted successfully.")
-        except psycopg2.Error as e:
-            logging.error(f"Error inserting article '{title}': {e}")
-            raise
-        
-    
 
+        # Convert dictionary to list of tuples for batch insertion
+        data = list(zip(
+            articles['link'],
+            articles['title'],
+            articles['text'],
+            [','.join(cat_list) for cat_list in articles['categories']],  # Convert list of categories to comma-separated string
+            articles['published_at']
+        ))
+
+        # Insert all articles in one go using execute_values
+        try:
+            extras.execute_values(self.cursor, insert_query, data)
+            self.conn.commit()  # Commit the transaction
+            logging.info(f"{len(data)} articles inserted successfully.")
+        except psycopg2.Error as e:
+            self.conn.rollback()  # Rollback the transaction on error
+            logging.error(f"Error inserting articles: {e}")
+            raise
+    
     def close_connection(self):
         """
         Closes the database connection.
