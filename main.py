@@ -3,12 +3,16 @@ from dotenv import load_dotenv
 import logging
 from scraper import ArticlesArray
 from db import Database
+import psycopg2
 from lib import config, utils
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 
 def main():
+    # Load environment variables
+    load_dotenv()
+
     # Initialize the database connection    
     db = Database(
         db_name=config.db['name'],
@@ -25,24 +29,22 @@ def main():
     scraper = ArticlesArray()
 
     # Scrape articles (for example, from page 1)
-    for p in range(2):
+    for p in range(config.n_pages_to_parse):
         scraper.scrape_search_page('https://nltimes.nl/', page=p)
-        
+
     parsed_articles = scraper.articles_dict
 
-    if parsed_articles:
-        logging.info(f'Scraped {len(parsed_articles)} articles.')
-        
-        # Insert articles into the database
-        links, titles, texts, categories, dates = (
-            parsed_articles['link'],
-            parsed_articles['title'],
-            parsed_articles['text'],
-            parsed_articles['categories'],
-            parsed_articles['published_at'],
-        )
-        for link, title, text, category, date in zip(links, titles, texts, categories, dates):
-            db.insert_article(link, title, text, category, date)
+    # Check if there are any articles to insert
+    if parsed_articles and parsed_articles['link']:
+        logging.info(f'Scraped {len(parsed_articles["link"])} articles.')
+
+        # Insert articles
+        try:
+            db.insert_articles(parsed_articles)
+            logging.info(f"Articles inserted successfully in one go.")
+        except psycopg2.Error as e:
+            db.conn.rollback()
+            logging.error(f"Error inserting articles: {e}")
 
     # Close the database connection
     db.close_connection()
